@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Cyber Hygiene Monitor",
+  "version": "1.0",
+  "description": "Tracks risky browsing patterns for cognitive security analysis.",
+  "permissions": ["tabs", "storage", "webNavigation"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"]
+    }
+  ]
+}

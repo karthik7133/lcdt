@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+.env
+
+# Node
+node_modules/
+dist/
+build/
+.eslintcache
+ui/frontend/node_modules/
+ui/frontend/dist/
+
+# Data/Logs (Telemetry)
+# We keep the directory but ignore the large logs
+data/*.csv
+data/*.log
+data/*.json
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

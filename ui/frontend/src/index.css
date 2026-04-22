@@ -1,0 +1,254 @@
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Rajdhani:wght@300;500;700&display=swap');
+
+:root {
+  --bg-dark: #050608;
+  --glass-bg: rgba(15, 18, 25, 0.7);
+  --glass-border: rgba(255, 255, 255, 0.1);
+  --neon-cyan: #00f2ff;
+  --neon-magenta: #ff00ea;
+  --neon-green: #39ff14;
+  --neon-red: #ff3131;
+  --text-primary: #e0e0e0;
+  --text-dim: #a0a0b0;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--bg-dark);
+  color: var(--text-primary);
+  font-family: 'Rajdhani', sans-serif;
+  overflow-x: hidden;
+}
+
+.app-container {
+  min-height: 100vh;
+  padding: 2rem;
+  background: radial-gradient(circle at 50% 50%, #0a1128 0%, #050608 100%);
+}
+
+.glass-panel {
+  background: var(--glass-bg);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--glass-border);
+  border-radius: 24px;
+  padding: 2rem;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.8);
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2rem;
+  border-bottom: 1px solid var(--glass-border);
+  padding-bottom: 1rem;
+}
+
+.dashboard-title {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 2rem;
+  letter-spacing: 4px;
+}
+
+.neon-text-cyan { color: var(--neon-cyan); text-shadow: 0 0 10px var(--neon-cyan); }
+.neon-text-magenta { color: var(--neon-magenta); text-shadow: 0 0 10px var(--neon-magenta); }
+.neon-text-green { color: var(--neon-green); text-shadow: 0 0 10px var(--neon-green); }
+.neon-text-red { color: var(--neon-red); text-shadow: 0 0 10px var(--neon-red); }
+
+/* Metrics Grid */
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.metric-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  transition: all 0.3s ease;
+}
+
+.metric-card:hover {
+  transform: translateY(-5px);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.metric-title {
+  font-size: 0.9rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 0.5rem;
+}
+
+.metric-value {
+  font-size: 2.5rem;
+  font-weight: 700;
+  font-family: 'Orbitron', sans-serif;
+}
+
+/* Charts Section */
+.charts-layout {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 2rem;
+}
+
+.section-box {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 20px;
+  padding: 1.5rem;
+  border: 1px solid var(--glass-border);
+}
+
+.chart-title {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 1.1rem;
+  margin-bottom: 1.5rem;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.risk-circle-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+
+.risk-percentage {
+  font-size: 4rem;
+  font-family: 'Orbitron', sans-serif;
+  text-align: center;
+}
+
+/* Simulation Controls */
+.sim-controls {
+  margin-top: 2rem;
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.sim-btn {
+  background: transparent;
+  border: 1px solid var(--neon-cyan);
+  color: var(--neon-cyan);
+  padding: 0.8rem 1.5rem;
+  border-radius: 10px;
+  cursor: pointer;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 0.8rem;
+  transition: all 0.3s;
+}
+
+.sim-btn:hover {
+  background: var(--neon-cyan);
+  color: black;
+  box-shadow: 0 0 20px var(--neon-cyan);
+}
+
+.sim-btn.active {
+  background: var(--neon-cyan);
+  color: black;
+}
+
+.pulsing-dot {
+  width: 10px;
+  height: 10px;
+  background-color: var(--neon-red);
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 10px;
+  animation: pulse 1.5s infinite;
+}
+
+/* Impact Summary Section */
+.impact-summary {
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  margin-top: 2rem;
+  padding: 1.5rem;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--glass-border);
+  border-radius: 20px;
+  gap: 1rem;
+}
+
+.impact-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.impact-label {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  margin-bottom: 0.5rem;
+}
+
+.impact-value {
+  font-family: 'Orbitron', sans-serif;
+  font-size: 1.5rem;
+  font-weight: bold;
+}
+
+.impact-arrow {
+  font-size: 1.5rem;
+  color: var(--text-dim);
+  opacity: 0.5;
+}
+
+.impact-card.highlight {
+  padding: 1rem 2rem;
+  background: rgba(0, 242, 255, 0.05);
+  border-radius: 15px;
+  border: 1px solid rgba(0, 242, 255, 0.1);
+}
+
+.impact-subtext {
+  font-size: 0.6rem;
+  color: var(--neon-cyan);
+  margin-top: 5px;
+  font-weight: bold;
+}
+
+/* Policy Analysis Box */
+.policy-analysis-box {
+  background: rgba(0, 242, 255, 0.05);
+  border-left: 4px solid var(--neon-cyan);
+  padding: 1rem;
+  margin-bottom: 1rem;
+  border-radius: 4px 12px 12px 4px;
+}
+
+.analysis-text {
+  font-size: 0.9rem;
+  line-height: 1.4;
+  color: var(--text-primary);
+}
+
+@keyframes pulse {
+  0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255, 49, 49, 0.7); }
+  70% { transform: scale(1.2); box-shadow: 0 0 0 10px rgba(255, 49, 49, 0); }
+  100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255, 49, 49, 0); }
+}
