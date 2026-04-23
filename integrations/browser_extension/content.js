@@ -51,13 +51,13 @@ document.addEventListener('blur', (e) => {
 }, true); // use capture phase for blur
 
 // Sender detection (Gmail/Outlook)
+let lastSendersDetected = "";
+
 function detectSenders() {
     const hostname = window.location.hostname;
     let senders = [];
     
     if (hostname.includes('mail.google.com')) {
-        // Gmail sender elements usually have class 'bA4' or 'zF' or similar. 
-        // More generally, look for email-like patterns in text or 'email' attributes.
         const elements = document.querySelectorAll('[email]');
         elements.forEach(el => senders.push(el.getAttribute('email')));
     } else if (hostname.includes('outlook.live.com') || hostname.includes('outlook.office.com')) {
@@ -65,10 +65,13 @@ function detectSenders() {
         elements.forEach(el => senders.push(el.innerText));
     }
     
-    // Filter and unique
-    senders = [...new Set(senders)].filter(s => s && s.includes('@'));
+    // Filter, unique, and SORT to compare content reliably
+    senders = [...new Set(senders)].filter(s => s && s.includes('@')).sort();
+    const currentSendersStr = senders.join(',');
     
-    if (senders.length > 0) {
+    if (senders.length > 0 && currentSendersStr !== lastSendersDetected) {
+        lastSendersDetected = currentSendersStr;
+        console.log(`[Cyber Guard] New senders detected: ${senders.length}`);
         chrome.runtime.sendMessage({
             type: 'EMAIL_SENDERS_DETECTED',
             details: { senders: senders, count: senders.length }

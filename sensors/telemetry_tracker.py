@@ -1,4 +1,5 @@
 import time
+import datetime
 import math
 import subprocess
 import threading
@@ -311,6 +312,7 @@ try:
         avg_response_time = 0.0
         phishing_clicked = "FALSE"
         scam_given = "FALSE"
+        hour_of_day = datetime.datetime.now().hour # Default to local system hour
 
         # Time window: only count events from the last 30 seconds
         SIGNAL_WINDOW_SECS = 30
@@ -361,6 +363,12 @@ try:
                             match = re.search(r'"count":\s*(\d+)', str(details))
                             if match:
                                 unknown_senders += int(match.group(1))
+
+                        # Extract hour of day from the latest event
+                        latest_details = str(df_beh.iloc[-1]['details'])
+                        match_hour = re.search(r'"hour_of_day":\s*(\d+)', latest_details)
+                        if match_hour:
+                            hour_of_day = int(match_hour.group(1))
 
         except Exception as e:
             pass  # If anything fails, signals stay at 0 (safe default)
@@ -425,6 +433,7 @@ try:
             'low_strength_passwords': low_strength_passwords,
             'unknown_senders': unknown_senders,
             'avg_response_time': avg_response_time,
+            'hour_of_day': hour_of_day, # Added from extension
             'os_update_delayed': 'TRUE' if update_risk > 0 else 'FALSE',
             'good_password_paste': 'TRUE' if good_password_flag else 'FALSE',
             'phishing_clicked': phishing_clicked,

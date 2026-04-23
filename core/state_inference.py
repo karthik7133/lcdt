@@ -62,6 +62,16 @@ class LatentStateInference:
             # If no baseline but absolute zero activity, drift mu lower
             mu -= 0.2
 
+        # --- CIRCADIAN RHYTHM IMPACT ---
+        # Late night/Early morning work (23:00 to 05:00) reduces capacity baseline
+        hour = signals.get('hour_of_day', 12) # Default to midday if unknown
+        if hour >= 23 or hour <= 5:
+            mu -= 0.2
+            # Also increase drain rate at night
+            self.alpha_down = 0.12 # 50% faster drain than default 0.08
+        else:
+            self.alpha_down = 0.08 # Reset to default
+
         # Split dynamics: recover fast, drain slow
         diff = mu - self.state["Ct"]
         alpha = self.alpha_up if diff > 0 else self.alpha_down
@@ -180,6 +190,12 @@ class LatentStateInference:
         # Only update Ht when a genuine event occurred — stable when idle
         if reward_r != 0.0:
             self.state["Ht"] = max(0.0, min(1.0, self.state["Ht"] + self.eta * reward_r))
+        else:
+            # --- SLOW HABIT RECOVERY ---
+            # If no negative events this interval, habits drift back toward 0.8 baseline.
+            # 0.005 per interval (10s) = ~0.03 per minute (~25 mins to full recovery).
+            if self.state["Ht"] < 0.8:
+                self.state["Ht"] = min(0.8, self.state["Ht"] + 0.005)
 
         # ------------------------------------------------------------------ #
         # 4. ADVERSARIAL EXPOSURE (At) — Event-Driven with Decay
