@@ -17,7 +17,7 @@ def run_cyber_watchdog():
     try:
         # 2. Run the Telemetry Tracker in the foreground
         # This keeps the terminal active for user feedback
-        subprocess.run([sys.executable, 'sensors/telemetry_tracker.py'])
+        subprocess.run([sys.executable, '-u', 'sensors/telemetry_tracker.py'])
     except KeyboardInterrupt:
         print("\n[SYSTEM] Stopping all components...")
     finally:

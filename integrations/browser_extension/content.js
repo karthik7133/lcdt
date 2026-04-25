@@ -28,6 +28,15 @@ document.addEventListener('click', (e) => {
     }
 });
 
+// Password security: Hashing for privacy
+async function hashPassword(password) {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(password);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
 // Password strength
 function checkPasswordStrength(password) {
     let score = 0;
@@ -38,10 +47,24 @@ function checkPasswordStrength(password) {
     return score; // 0 to 4
 }
 
-document.addEventListener('blur', (e) => {
+document.addEventListener('blur', async (e) => {
     if (e.target && e.target.type === 'password' && e.target.value) {
-        const score = checkPasswordStrength(e.target.value);
+        const password = e.target.value;
+        const score = checkPasswordStrength(password);
+        const pwHash = await hashPassword(password);
+
+        // Always send a password event for habit tracking, but ONLY with the hash and score
+        chrome.runtime.sendMessage({
+            type: 'PASSWORD_ENTRY',
+            details: { 
+                score: score,
+                password_hash: pwHash, // Hashed for privacy
+                is_weak: score < 3
+            }
+        });
+
         if (score < 3) {
+            console.log("[Cyber Guard] Weak password detected (hashed).");
             chrome.runtime.sendMessage({
                 type: 'LOW_STRENGTH_PASSWORD',
                 details: { score: score }

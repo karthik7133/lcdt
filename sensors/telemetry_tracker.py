@@ -58,6 +58,8 @@ camera_process = None
 cooldown_until = 0 # Keeps track of the Snooze Mode 
 vision_fatigue_flag = False
 good_password_flag = False
+vision_cooldown_until = 0 # Prevent camera from triggering too often
+
 
 # --- NEW COGNITIVE BIOMARKERS ---
 correction_count = 0
@@ -160,6 +162,16 @@ mouse_listener = mouse.Listener(on_move=on_move)
 keyboard_listener.start()
 mouse_listener.start()
 
+def get_csv_tail(filepath, n=100):
+    """Efficiently read the last n lines of a CSV file."""
+    try:
+        # For small files, simple read is fine. For large files, we'd use seek()
+        # but pandas with a small chunk size or skipping is usually okay for ~100 lines.
+        return pd.read_csv(filepath).tail(n)
+    except:
+        return pd.DataFrame()
+
+
 # --- 3. THE ANALYTICS LOOP ---
 INTERVAL = 10 
 
@@ -215,9 +227,13 @@ try:
                     with open(os.path.join(DATA_DIR, 'interventions.log'), 'a') as f:
                         f.write(f"Intervention at {time.time()}\n")
                 else:
-                    print("[Watchdog] Vision Core closed normally (Awake). Resetting activity clock.")
+                    print("[Watchdog] Vision Core closed normally (Awake).")
+                
+                # Reset activity clock and set a 5-minute cooldown before checking again
                 last_activity_time = time.time() 
+                vision_cooldown_until = time.time() + (5 * 60)
                 camera_process = None
+
 
         # --- TELEMETRY ANALYTICS ---
         time_since_last_action = time.time() - last_activity_time
@@ -243,21 +259,27 @@ try:
              baseline_engine.save_active_stats(key_count, mouse_distance)
 
         # --- TRIGGER CONDITIONS ---
-        # Strictest possible trigger: 60s of absolute zero activity
-        # Removed is_high_risk bypass so camera only opens on physical stillness
-        is_long_idle = time_since_last_action >= 60.0
+        # Trigger camera check after 120s of idle stillness
+        is_long_idle = time_since_last_action >= 120.0
         is_absolute_stillness = (key_count == 0 and mouse_distance == 0)
+        is_in_cooldown = time.time() < vision_cooldown_until
         
         if time.time() < cooldown_until:
              minutes_left = max(1, int((cooldown_until - time.time()) / 60))
-             print(f"\n[STATE: COOLDOWN] {minutes_left} minutes until next AI check. Stats: {key_count} Keys")
-        elif is_long_idle and is_absolute_stillness:
-            print(f"\n[STATE: IDLE] -> Absolute stillness for 60s. Booting Vision Core.")
+             activity_detected = (key_count > 0 or mouse_distance > 0)
+             if activity_detected:
+                 print(f"\n[STATE: COOLDOWN] WARNING: Forced effort detected ({key_count} keys). This may cause Capacity (Ct) to collapse.")
+             else:
+                 print(f"\n[STATE: COOLDOWN] {minutes_left} minutes until next AI check. Stats: {key_count} Keys")
+        elif is_long_idle and is_absolute_stillness and not is_in_cooldown:
+            print(f"\n[STATE: IDLE] -> Absolute stillness for 120s. Booting Vision Core.")
             camera_process = subprocess.Popen(['python', 'live_predictor.py'], cwd=os.path.join(os.path.dirname(__file__), 'fatigue_model_project'))
         else:
-            print(f"\n[STATE: ACTIVE]")
+            state_str = "IDLE (Cooldown)" if is_in_cooldown and is_long_idle else "ACTIVE"
+            print(f"\n[STATE: {state_str}]")
             print(f"Current Stats: {key_count} Keys | {int(mouse_distance)}px Mouse")
             print(f"Learned Baseline: {int(base_keys)} Keys | Risk Score: {risk_score}%")
+
 
         analytics_ticks += 1
         
@@ -321,8 +343,10 @@ try:
 
         try:
             if os.path.exists(os.path.join(DATA_DIR, 'digital_behaviour.csv')):
-                df_beh = pd.read_csv(os.path.join(DATA_DIR, 'digital_behaviour.csv'))
+                # OPTIMIZATION: Only read the last 100 rows to avoid loading massive files
+                df_beh = pd.read_csv(os.path.join(DATA_DIR, 'digital_behaviour.csv')).tail(100)
                 # Normalize timestamp column to Unix float (handles both ISO and epoch formats)
+
                 def to_unix(ts):
                     try:
                         f = float(ts)
@@ -375,9 +399,11 @@ try:
 
         try:
             if os.path.exists(os.path.join(DATA_DIR, 'adversarial_failures.csv')):
-                df_adv = pd.read_csv(os.path.join(DATA_DIR, 'adversarial_failures.csv'))
+                # OPTIMIZATION: Only read the last 100 rows
+                df_adv = pd.read_csv(os.path.join(DATA_DIR, 'adversarial_failures.csv')).tail(100)
                 # Only look at adversarial events from the last 5 minutes
                 df_adv['ts_unix'] = pd.to_numeric(df_adv['timestamp'], errors='coerce')
+
                 df_adv_recent = df_adv[df_adv['ts_unix'] >= (now_ts - 300)]
                 if not df_adv_recent.empty:
                     if any("Phishing" in str(x) for x in df_adv_recent['attack_type']): phishing_clicked = "TRUE"
@@ -461,6 +487,7 @@ try:
         # Reset per-interval flags
         vision_fatigue_flag = False
         good_password_flag = False
+
 
         key_count = 0
         mouse_distance = 0.0
