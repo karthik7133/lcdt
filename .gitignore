@@ -30,3 +30,9 @@ data/*.json
 # OS
 .DS_Store
 Thumbs.db
+
+# Secrets and large binaries
+core/credentials.json
+core/token.json
+*.pt
+*.pdf
