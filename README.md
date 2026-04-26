@@ -1,6 +1,6 @@
-# 🛡️ Cyber Watchdog: Lifelong Cognitive-Cyber Digital Twin (V5)
+# 🛡️ Lifelong Cognitive Digital Twin (LCDT)
 
-> A 5-layer scientific system that predicts and prevents cyber-security errors by modeling the human **internal cognitive state** as a living dynamical system — not a static checklist.
+> A **6-layer scientific system** that predicts and prevents human cyber-security errors by modelling the employee's internal cognitive state as a continuous, living dynamical system — using Neural Controlled Differential Equations, Structural Causal Models, Weibull Survival Analysis, and Monte-Carlo counterfactual simulation.
 
 ---
 
@@ -8,148 +8,374 @@
 
 ```text
 /
-├── main.py                          # Entry point: starts all sensors & watchdog
-├── api/
-│   └── dashboard_api.py             # Flask server: telemetry ingestion, simulation & state API
+├── main.py                            # Entry point — starts all sensors & inference loop
+│
 ├── core/
-│   ├── state_inference.py           # L2/L3: NCDE + EMA hybrid cognitive state engine
-│   ├── simulation_engine.py         # L5: Causal (SCM) Monte-Carlo simulation engine
-│   ├── risk_forecaster.py           # L4: Logistic risk scorer & 7-day trajectory forecaster
-│   ├── baseline_engine.py           # Lifelong learning for typing/mouse baselines & OS hygiene
-│   ├── context_api.py               # Google Calendar integration, sleep deficit & interruption detection
-│   └── ncde_weights.pt              # Trained Neural CDE model weights
+│   ├── state_inference.py             # L1 + L2 + L3  —  Behaviour Graph + NCDE + Personalisation
+│   ├── risk_forecaster.py             # L4 + L5  —  Causal SCM + Bayesian Hazard Model
+│   ├── simulation_engine.py           # L6  —  Monte-Carlo Digital Twin Simulator
+│   ├── baseline_engine.py             # Lifelong typing/mouse baseline + OS hygiene audit
+│   ├── context_api.py                 # Google Calendar integration (L1 workload signal)
+│   └── ncde_weights.pt                # Trained Neural CDE model weights (PyTorch)
+│
 ├── sensors/
-│   ├── telemetry_tracker.py         # Background watchdog (keystrokes, mouse, audio, windows)
-│   └── fatigue_model_project/       # Vision Core AI (EAR / MAR / Head-Pose analysis)
+│   ├── telemetry_tracker.py           # Background watchdog: keys, mouse, audio, windows
+│   └── fatigue_model_project/         # Vision Core AI: EAR / MAR / Head-Pose via camera
+│
+├── api/
+│   └── dashboard_api.py               # Flask REST API — bridges all 6 layers to the frontend
+│
 ├── simulations/
-│   └── simulate_phishing_click.py   # Phishing/adversarial signal injector for testing
+│   └── simulate_phishing_click.py     # Adversarial signal injector for integration testing
+│
 ├── integrations/
-│   └── browser_extension/           # Browser hook (HTTP exposure & Webmail detection)
+│   └── browser_extension/             # Chrome hook: HTTP exposure & Webmail detection
+│
 ├── ui/
-│   ├── alert_ui.py                  # Native fatigue intervention popup
-│   └── frontend/                    # React + Vite dashboard (Recharts, Lucide, Glassmorphism HUD)
-├── data/                            # All telemetry logs and CSV archives
-├── ARCHITECTURE_V5.md               # Full technical architecture reference
-└── README.md
+│   ├── alert_ui.py                    # Native OS fatigue intervention popup
+│   └── frontend/                      # React + Vite + Recharts dashboard (Glassmorphism HUD)
+│
+└── data/                              # All telemetry, latent state logs, and CSV archives
+    ├── latent_states.csv              # Historical [Ct, Dt, Ht, At, CRGt, risk_pct] — NCDE training data
+    ├── telemetry_history.csv          # Raw keystroke / mouse history for baseline learning
+    ├── digital_behaviour.csv          # Browser extension behaviour log
+    └── adversarial_failures.csv       # Phishing / credential-theft event log
 ```
 
 ---
 
-## 🏗️ Architecture Overview
-
-The system is organized as a **5-layer pipeline**, each layer building on the output of the previous one.
+## 🏗️ Architecture: 6-Layer Pipeline
 
 ```
-Layer 1 → Raw Sensors      (Physical + Digital Biomarkers)
-Layer 2 → State Inference  (Latent Vector Zt from NCDE + EMA)
-Layer 3 → Dynamics Engine  (SDEs: Slow / Fast / Medium timescales)
-Layer 4 → Risk Forecaster  (Mistake Probability + 7-Day Trajectory)
-Layer 5 → Digital Twin Sim (Causal SCM Monte-Carlo Intervention Engine)
+Raw Sensors  ──►  Behaviour Graph  ──►  NCDE (Zt)  ──►  Personalisation
+   [L1]                [L1]              [L2]               [L3]
+                                          │
+                                          ▼
+                            Causal Risk Engine (SCM)  ──►  Survival Analysis
+                                    [L4]                        [L5]
+                                          │
+                                          ▼
+                               Monte-Carlo Digital Twin
+                                        [L6]
 ```
+
+Each layer is a fully implemented Python class in the `core/` package.
 
 ---
 
-## 🔬 Layer 1: Human & Digital Sensing (The Input Layer)
+## 🔬 Layer 1 — Multimodal Behaviour Graph
 
-*Multi-modal capture of physical and digital biomarkers.*
+**File:** `core/state_inference.py` → `BehaviourGraphEngine`
 
-### 1.1 Human Sensing (Cognitive Biomarkers)
+Instead of a flat feature vector, all raw sensor signals are represented as a **Temporal Directed Multigraph** (`networkx.MultiDiGraph`). Every signal is an edge between named semantic nodes with a timestamp and weight.
 
-| Feature | Logic | File |
-| :--- | :--- | :--- |
-| **Typing Friction** | Ratio of corrections (Backspaces/Deletes) to total keystrokes. High ratio = fatigue. | `sensors/telemetry_tracker.py` |
-| **Task Switching** | Rapid window-title changes per minute (20+ = context-overload). | `sensors/telemetry_tracker.py` |
-| **Sleep Deficit** | Flagged when fatigue is detected in the first hour of a session. | `core/context_api.py` |
-| **Interruption Count** | Audio-peak detection of system notification sounds via `pycaw`. | `sensors/telemetry_tracker.py` |
-| **Calendar Context** | Google Calendar integration to detect back-to-back meeting load. | `core/context_api.py` |
-| **Vision Verification** | Deep-learning check (EAR / MAR / Head Slump) via camera. | `sensors/fatigue_model_project/` |
+### The 20 Signals and Their Graph Topology
 
-### 1.2 Digital Behaviour (Technical Intelligence)
+| Signal | Source Node | Target Node | Event Type |
+| :--- | :--- | :--- | :--- |
+| `key_count` | User | Workstation | typing |
+| `mouse_entropy` | User | Workstation | mouse_movement |
+| `typing_error_rate` | User | Workstation | typing_friction |
+| `task_switches` | Apps | User | context_switch |
+| `notification_count` | System | User | interruption |
+| `workload_modifier` | Schedule | User | calendar_pressure |
+| `insecure_http_hits` | Browser | Risk | insecure_browse |
+| `webmail_hits` | Browser | Risk | webmail_access |
+| `link_clicks` | Browser | Risk | link_click |
+| `email_frequency` | Email | User | email_activity |
+| `unknown_senders` | Email | Risk | phishing_signal |
+| `avg_response_time` | Email | User | email_response |
+| `low_strength_passwords` | Security | Risk | weak_password |
+| `good_password_paste` | Security | User | good_habit |
+| `os_update_delayed` | System | Risk | update_delay |
+| `sleep_deficit` | Bio | User | sleep_debt |
+| `vision_fatigue` | Bio | User | vision_fatigue |
+| `phishing_clicked` | Threat | Risk | phishing_click |
+| `scam_credentials_given` | Threat | Risk | credential_theft |
+| `hour_of_day` | Clock | User | circadian |
 
-| Feature | Logic | File |
-| :--- | :--- | :--- |
-| **Browser Exposure** | Extension hooks for Insecure HTTP and high-risk Webmail access. | `integrations/browser_extension/` |
-| **OS Hygiene Audit** | Queries last security patch date (>30 days = Risk). | `core/baseline_engine.py` |
-| **Password Habits** | Rewards Ctrl+V Paste actions following Password Manager activity. | `sensors/telemetry_tracker.py` |
-| **Adversarial Signals** | Ingests simulated phishing clicks and credential-scam failures. | `api/dashboard_api.py` |
+Graph edges have a **5-minute TTL** — stale edges are pruned automatically so that Demand (Dt) drops to idle levels when the user stops working, preventing the "stuck high risk" problem.
 
----
+### The 12-Dimensional Graph Embedding
 
-## 🧠 Layer 2: State Inference — Latent Vector Mapping
+The graph is read by a `get_embedding()` method that extracts a 12-dimensional structural feature vector for the NCDE to consume:
 
-*Maps raw Layer 1 signals into the Hidden Human State vector **Z_t**.*
-
-The inference engine in `core/state_inference.py` uses a **Neural Controlled Differential Equation (NCDE)** model (weights in `core/ncde_weights.pt`) combined with an **EMA-smoothed hybrid** to produce stable, continuous-time cognitive state estimates — even during sensor noise or idle gaps.
-
-| State Variable | Definition | Timescale |
-| :--- | :--- | :--- |
-| **C_t (Capacity)** | Total mental energy available. | Slow (hours) |
-| **D_t (Demand)** | Current cognitive pressure / overwhelm. | Fast (minutes) |
-| **H_t (Habits)** | Cybersecurity hygiene score. | Medium (days) |
-| **A_t (Adversarial)** | Immediate threat-exposure level. | Event-driven |
-| **CRG_t (Reserve Gap)** | D_t − C_t: positive = Cognitive Debt. | Derived |
-
----
-
-## ⚙️ Layer 3: Multi-Timescale Dynamics (The "Brain")
-
-*Stochastic Differential Equations give the hidden state biological momentum.*
-
-### Slow Dynamics — Cognitive Capacity (C_t)
 ```
-dC_t = α(μ - C_t)dt + σ·dW_t
+[0]  Total active edges
+[1]  Mean edge weight
+[2]  Weighted in-degree of User node
+[3]  Weighted in-degree of Risk node
+[4]  Weighted out-degree of Threat node
+[5]  Weighted out-degree of Browser node
+[6]  Weighted out-degree of Email node
+[7]  Weighted in-degree of Security node
+[8]  Weighted out-degree of Bio node
+[9]  Weighted in-degree of Workstation node
+[10] Number of distinct event types currently active
+[11] Recency score (edges in last 30 seconds / total edges)
 ```
-Capacity slowly drifts toward a personal baseline (μ). A sleep deficit lowers μ, making recovery take hours.
 
-### Fast Dynamics — Cognitive Demand (D_t)
-```
-dD_t = [f(work) - β(D_t - 0.1)]dt + σ·dW_t
-```
-Demand spikes immediately with workload and cools off slowly — it cannot drop to zero the instant work stops.
+### Google Calendar Integration
 
-### Medium Dynamics — Habit Evolution (H_t)
-```
-H_{t+1} = H_t + η·R_t
-```
-Security habits evolve via a Learning Rate (η) multiplied by behavioral rewards/penalties (R_t).
+`core/context_api.py` → `GoogleContextEngine` authenticates via OAuth 2.0 and fetches today's calendar to seed the `workload_modifier` signal before the session starts:
 
-**Implementation**: `core/state_inference.py`
-
----
-
-## 📈 Layer 4: Predictive Analytics (The Risk Forecaster)
-
-*Converts abstract psychology into a concrete, actionable business metric.*
-
-### Mistake Probability — P(M_t)
-```
-P(M_t) = σ(β₁·CRG_t + β₂·H_t + β₃·A_t + bias)
-```
-- **Reserve Gap (CRG_t)**: Positive cognitive debt exponentially raises risk.
-- **Habit Shield (H_t)**: Acts as a protective negative weight.
-- **Adversarial (A_t)**: Real-time threat amplifier.
-
-### 7-Day Risk Trajectory
-Recursively simulates Capacity drain under sustained Demand to predict the exact day a user enters a **Burnout Window** — before it happens.
-
-**Implementation**: `core/risk_forecaster.py`
-
----
-
-## 🔮 Layer 5: Digital Twin Simulation (Causal Inference Engine)
-
-*Answers "what if?" questions using Structural Causal Models and Monte-Carlo sampling.*
-
-The simulation engine (`core/simulation_engine.py`) models the **Expected Risk** under specific policy interventions — `E[M_{t:T} | do(π)]`:
-
-| Intervention Policy | Effect Modelled |
+| Meetings Today | Workload Modifier |
 | :--- | :--- |
-| `do(security_training)` | Injects a reward spike into the Habit learning rate. |
-| `do(ui_policy_change)` | Zeroes task-switching penalties to quantify UX impact on risk. |
-| `do(increased_workload)` | Simulates long-term failure rate under extreme stress scenarios. |
-| `do(aging_progression)` | Simulates long-term cognitive drift and capacity reduction. |
+| 0 | 0.0 |
+| 1–2 | 0.1 |
+| 3–4 | 0.3 |
+| 5+ | 0.5 |
 
-Results are streamed to the React dashboard as stochastic probability distributions.
+---
+
+## 🧠 Layer 2 — Neural Controlled Differential Equations (NCDE)
+
+**File:** `core/state_inference.py` → `NCDEModel`, `CDEFunc`, `ReadoutHead`
+
+The graph embedding sequence is consumed by a **Neural CDE** — a continuous-time deep learning model that replaces hand-crafted differential equations entirely.
+
+### The NCDE Equation
+
+```
+dZt = f_θ(Zt) dt + g_ϕ(Zt) dXt
+```
+
+- `Xt` = the graph embedding path (interpolated as a **Hermite cubic spline**)
+- `g_ϕ(Zt)` = the **CDE function** — a 2-layer MLP with `tanh` activation that outputs `(hidden_dim × input_dim)` — the control matrix
+- Integration is performed by `torchcde.cdeint` using the **RK4** solver over the interval `[0, 1]`
+- `f_θ` is implicitly contained inside the MLP (autonomous drift)
+
+### Architecture
+
+```
+Input (batch, seq_len=10, 12)
+    │
+    ▼ Hermite cubic spline interpolation
+    │
+    ▼ Initial Encoder: Linear(12 → 8) + Tanh  →  z0
+    │
+    ▼ CDE Integration: torchcde.cdeint [RK4]
+    │     g_ϕ(Zt): Linear(8→64)→Tanh→Linear(64→64)→Tanh→Linear(64→8×12)→Tanh
+    │
+    ▼ z_final  (batch, 8)
+    │
+    ▼ Readout Head: Linear(8→32)→ReLU→Linear(32→4)→Sigmoid
+    │
+Output: [Ct, Dt, Ht, At]  ∈ (0, 1)
+```
+
+**Dimensions:** Input=12, Hidden=8, Output=4  
+**Training:** MSE loss on historical `latent_states.csv` sequences, Adam optimizer, 60 epochs  
+**Weights:** Saved and loaded from `core/ncde_weights.pt`
+
+### Stability Gate
+
+When the graph embedding window is nearly constant (idle, std < 0.05), the NCDE is bypassed entirely to prevent RK4 numerical noise from causing oscillations. Instead, Ct/Ht/At decay gently toward the user's personal prior at a 5% recovery rate per tick.
+
+### Signal-Driven Demand Override
+
+Demand (Dt) is **always** computed directly from raw signals — not from the NCDE — to ensure it drops to the idle floor `~0.1` immediately when the user stops working:
+
+```
+Dt = 0.10 (idle floor)
+   + 0.35 × typing_pressure    (key_count / personal_baseline)
+   + 0.20 × task_switch_norm   (task_switches / 10)
+   + 0.15 × notification_norm  (notification_count / 5)
+   + 0.10 × calendar_pressure  (workload_modifier)
+   + 0.10 × sleep_penalty      (if sleep_deficit = TRUE)
+```
+
+---
+
+## 👤 Layer 3 — Personalized Latent Cognitive State Space
+
+**File:** `core/state_inference.py` → `UserProfile`
+
+Every employee has different cognitive physics. Layer 3 maintains a **per-user Bayesian prior**:
+
+```
+Zt(user) ~ N(μ_user, Σ_user)
+```
+
+### Online MAP Update (Exponential Moving Average)
+
+```
+μ_new   = (1 - α) × μ_old + α × z_observed
+σ²_new  = (1 - α) × σ²_old + α × (z_observed - μ_new)²
+```
+
+where `α = 0.05` (slow adaptation to prevent reacting to single outlier sessions).
+
+### Bayesian Shrinkage (Personalization Blend)
+
+The NCDE output is blended with the user prior before being used downstream:
+
+```
+z_posterior = λ × z_model + (1 - λ) × μ_user
+```
+
+where `λ = min(0.85, 0.5 + n_obs / 200)` — the model is trusted more as more personal data accumulates.
+
+### EMA Smoothing + Slew Rate Limiting
+
+After personalisation, an additional EMA (`α = 0.10`) and per-tick max-change limiter (`MAX_SLEW = 0.05`) prevent oscillation from tick to tick.
+
+---
+
+## ⚖️ Layer 4 — Causal Risk Engine (Structural Causal Model)
+
+**File:** `core/risk_forecaster.py` → `CausalRiskEngine`
+
+Layer 4 models **causality**, not just correlation. The risk score is computed from a **Structural Causal Model (SCM)**:
+
+```
+Risk = σ( B_reserve × CRGt  +  B_habits × Ht  +  B_threat × At  +  bias )
+```
+
+Where `CRGt = Ct − Dt` (the Cognitive Reserve Gap — negative means Cognitive Debt).
+
+### Data-Driven Causal Weight Estimation
+
+When `latent_states.csv` contains ≥ 50 observations, causal weights are estimated via **OLS on the logit scale** from actual telemetry data:
+
+```
+logit(P) = B_reserve × CRGt + B_habits × Ht + B_threat × At + bias
+B = (X'X)⁻¹ X'y
+```
+
+Default calibrated weights (used when data is insufficient):
+
+| Weight | Value | Interpretation |
+| :--- | :--- | :--- |
+| B_reserve | −2.5 | Higher capacity reserve → lower risk |
+| B_habits | −1.8 | Stronger security habits → strong protection |
+| B_threat | +4.5 | Active adversarial event → sharp risk spike |
+| bias | +0.5 | Prior risk at neutral state |
+
+### do-Calculus Interventions
+
+Layer 4 supports **surgical do-interventions** (`do(π)`) that modify a specific causal variable to compute counterfactual risk:
+
+| Intervention `do(π)` | Variable Modified | Effect |
+| :--- | :--- | :--- |
+| `reduce_notifications` | Dt × 0.70 | 30% demand reduction |
+| `reduce_meetings` | Dt × 0.80 | 20% demand reduction |
+| `pause_work` | Dt × 0.30 | 70% demand reduction |
+| `improve_sleep` | Ct + 0.15 | Capacity restoration |
+| `security_training` | Ht + 0.20 | Habit improvement |
+| `adversarial_drill` | At × 0.50 | Threat exposure awareness |
+
+---
+
+## 📈 Layer 5 — Bayesian Temporal Hazard Model (Survival Analysis)
+
+**File:** `core/risk_forecaster.py` → `BayesianHazardModel`
+
+Layer 5 replaces logistic regression with a proper **survival analysis** model that answers: *"What is the probability of a security mistake in the next τ hours?"*
+
+### Weibull Proportional Hazard
+
+```
+P(mistake in [t, t+τ] | Zt) = 1 - exp(-(τ / λ(Zt))^k)
+```
+
+- **λ(Zt)** = scale parameter, inversely proportional to current risk: `λ = (100 - risk_pct) / 10`
+- **k** = shape parameter with Gaussian prior `k ~ N(1.5, 0.15)` (k > 1 means increasing hazard over time)
+
+### Posterior Uncertainty via Monte-Carlo
+
+Instead of a point estimate, 500 samples are drawn from the posterior of `k` to produce a full **probability distribution** with CI bands:
+
+```python
+k_samples = N(k_mean, k_std, n=500)
+probs     = 1 - exp(-(τ / λ)^k_samples)
+→ { mean, median, std, lower_5th, upper_95th }
+```
+
+### Online Posterior Update
+
+When a real security mistake is recorded, the Weibull shape `k` is updated via **Method of Moments**:
+
+```
+k_new ≈ (mean_time_to_mistake / std)^1.086
+```
+
+---
+
+## 🔮 Layer 6 — True Digital Twin: Monte-Carlo Counterfactual Simulation
+
+**File:** `core/simulation_engine.py` → `DigitalTwinSimulator`
+
+Layer 6 simulates **500 independent future trajectories** using vectorised NumPy operations — completing in ~0.5 seconds — to compute:
+
+```
+Future trajectories ~ p(Zt:T | Zt, do(π))
+```
+
+### Stochastic Dynamics (Learned Noise Parameters)
+
+Each trajectory evolves the state `[Ct, Dt, Ht, At]` with Gaussian noise calibrated from the historical standard deviation in `latent_states.csv`:
+
+| Variable | Noise σ (default) | Dynamics |
+| :--- | :--- | :--- |
+| Ct | 0.015 | Slow — drains when Dt > threshold, recovers when idle |
+| Dt | 0.025 | Fast — drifts per policy, decays at rest |
+| Ht | 0.010 | Medium — shifts slowly with training reward |
+| At | 0.020 | Event-driven — spikes on attack, decays at 0.92/step |
+
+### Supported Intervention Policies
+
+| Policy | Effect on Dynamics |
+| :--- | :--- |
+| `baseline` | No intervention |
+| `increased_workload` | Dt drift +0.04, Ct drains faster |
+| `reduced_workload` | Dt drift −0.03 |
+| `reduce_meetings` | Dt drift −0.03 |
+| `reduce_notifications` | Dt drift −0.02 |
+| `security_training` | Ht gain +0.01 per step |
+| `improve_sleep` | Ct recovery +0.02 per step |
+| `pause_work` | Dt drift −0.05, Ct recovery +0.04 |
+| `aging_progression` | Ct ceiling decays over time |
+| `adversarial_drill` | Random At spikes at 5% probability |
+
+### Aggregated Outputs (per time step)
+
+Each simulation returns, for every step across 500 trajectories:
+
+```
+Mean_Risk         — expected risk across all futures
+Median_Risk       — median trajectory
+Risk_Upper_95     — 95th percentile (worst case)
+Risk_Lower_5      — 5th percentile (best case)
+Risk_Std          — trajectory uncertainty
+Mean_Capacity     — expected cognitive capacity
+Mean_Hazard_24h   — expected P(mistake in 24h) via Weibull
+Burnout_Confidence — % of trajectories where risk > 70%
+Burnout_Horizon   — first step where mean risk crosses 70%
+```
+
+### Counterfactual Delta
+
+The API supports computing `E[Risk | do(π)] − E[Risk | baseline]` per step to quantify the exact risk reduction from any intervention.
+
+---
+
+## 🌐 REST API
+
+**File:** `api/dashboard_api.py` — Flask server on `http://localhost:5000`
+
+| Method | Endpoint | Layer | Description |
+| :--- | :--- | :--- | :--- |
+| GET | `/api/summary` | L2/L3 | Live state snapshot: Ct, Dt, Ht, At, CRGt, risk_pct |
+| GET | `/api/latent_states` | L2/L3 | Historical state time series (last 30 records) |
+| GET | `/api/stats` | L1 | Raw keystroke telemetry history |
+| GET | `/api/forecast` | L5 | 7-day risk trajectory with CI bands |
+| GET | `/api/hazard` | L5 | P(mistake in 1h / 24h / 7d) with posterior uncertainty |
+| GET | `/api/counterfactuals` | L4 | All 6 interventions ranked by risk reduction |
+| POST | `/api/simulation` | L6 | Monte-Carlo simulation for a given policy |
+| POST | `/api/counterfactual_delta` | L6 | E[Risk\|do(π)] vs baseline delta |
+| POST | `/api/behaviour` | L1 | Browser extension event log |
+| POST | `/api/adversarial_signal` | L1 | Phishing / scam signal injection |
 
 ---
 
@@ -159,46 +385,49 @@ Results are streamed to the React dashboard as stochastic probability distributi
 ```bash
 python api/dashboard_api.py
 ```
-Runs on `http://localhost:5050`. Exposes telemetry ingestion, cognitive state, and simulation endpoints.
+Initialises the NCDE model (loading `ncde_weights.pt`), the Causal SCM, and the Monte-Carlo simulator. Runs on `http://localhost:5000`.
 
 ### 2. Run the Watchdog Engine
 ```bash
 python main.py
 ```
-Starts all sensors (keyboard, mouse, audio, vision) and the state inference pipeline.
+Starts all sensors (keyboard, mouse, audio, windows), runs the NCDE inference loop every 10 seconds, and logs latent states to `data/latent_states.csv`.
 
-### 3. Launch the Frontend Dashboard
+### 3. Launch the React Dashboard
 ```bash
 cd ui/frontend
 npm install
 npm run dev
 ```
-Opens the live Glassmorphism HUD showing real-time cognitive metrics, risk score, and simulation results.
+Opens the live dashboard with real-time Ct/Dt/Ht charts, risk score, 7-day survival forecast, and Monte-Carlo simulation panel.
 
-### 4. Inject an Adversarial Signal (Testing)
+### 4. Test an Adversarial Signal
 ```bash
 python simulations/simulate_phishing_click.py
 ```
-Sends a phishing-click event to the API to verify the system reacts in real-time.
+Posts a phishing-click event to `/api/adversarial_signal` to verify Layer 1 → Layer 4 threat propagation in real-time.
 
 ---
 
 ## 🛠️ Technical Stack
 
-| Layer | Technology |
+| Component | Technology |
 | :--- | :--- |
-| **Core Logic** | Python 3.11 — NumPy, Pandas, Flask |
-| **NCDE Model** | PyTorch (`torchcde`) |
-| **Sensors** | Pynput (Keys/Mouse), Pycaw (Audio), PyGetWindow (Context) |
-| **Calendar** | Google Calendar API (`google-auth`, `google-api-python-client`) |
-| **Frontend** | React + Vite + Recharts + Lucide-React |
-| **UI Aesthetic** | Dark-mode Glassmorphism, Neon HUD, Orbitron Typography |
+| **Core Engine** | Python 3.11 — NumPy, Pandas, Flask |
+| **Neural CDE Model** | PyTorch + `torchcde` (Hermite cubic spline, RK4 integration) |
+| **Causal Graph** | NetworkX `MultiDiGraph` (Temporal Behaviour Graph) |
+| **Survival Analysis** | NumPy — Weibull Monte-Carlo posterior sampling |
+| **Sensors** | Pynput (keys/mouse), Pycaw (audio), PyGetWindow (windows) |
+| **Calendar** | Google Calendar API v3 (OAuth 2.0) |
+| **API** | Flask + Flask-CORS |
+| **Frontend** | React 18 + Vite + Recharts + Lucide-React |
+| **UI Aesthetic** | Dark-mode Glassmorphism, Neon HUD, Orbitron typography |
 
 ---
 
 ## 🔒 Privacy Guarantee
 
-- **No Keylogging**: The system counts keystroke *frequencies* — never content.
-- **Privacy-First Vision**: The camera activates only on inactivity detection and shuts down immediately after verification.
-- **Local Processing**: All telemetry is stored and processed entirely on-device. Nothing is sent to external servers.
-- **Credential Safety**: Google Calendar credentials (`core/credentials.json`) are read-only and stored locally.
+- **No Keylogging**: Only keystroke *counts and rates* are recorded — never content.
+- **Privacy-First Vision**: Camera activates only on inactivity detection and shuts down immediately after EAR/MAR verification completes.
+- **Fully Local**: All inference, telemetry, and model training runs on-device. No data leaves the machine.
+- **Read-Only Calendar**: Google Calendar access is scoped to `calendar.readonly`. Credentials stored locally in `core/credentials.json`.
