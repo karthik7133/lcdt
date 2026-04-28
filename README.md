@@ -21,6 +21,10 @@
 ├── sensors/
 │   ├── telemetry_tracker.py           # Background watchdog: keys, mouse, audio, windows
 │   └── fatigue_model_project/         # Vision Core AI: EAR / MAR / Head-Pose via camera
+│       ├── fuzzy_engine.py            # Core Fuzzy Logic inference engine (Mamdani, CoG defuzz)
+│       ├── train_fuzzy.py             # Evaluates fuzzy engine on dataset, exports fuzzy_model.pkl
+│       ├── live_predictor_fuzzy.py    # Live webcam fatigue predictor using fuzzy engine
+│       └── augment_dataset.py         # Extracts features from archive images, augments to 10k+ rows
 │
 ├── api/
 │   └── dashboard_api.py               # Flask REST API — bridges all 6 layers to the frontend
@@ -409,6 +413,92 @@ Posts a phishing-click event to `/api/adversarial_signal` to verify Layer 1 → 
 
 ---
 
+## 👁️ Vision Core — Fuzzy Logic Fatigue Detection
+
+**Folder:** `sensors/fatigue_model_project/`  
+**Engine:** Expert Fuzzy Logic System (Mamdani inference + Centroid of Gravity defuzzification)  
+**Replaces:** Previous SVM classifier (`train_svm.py` + `fatigue_model_v2.pkl`)
+
+The vision subsystem detects operator fatigue in real time via a webcam. MediaPipe FaceMesh extracts biometric features every frame; these are fed into a pure-NumPy fuzzy inference engine that produces a continuous **Fatigue Index ∈ [0, 100]**.
+
+### Why Fuzzy Logic over SVM?
+
+| Property | SVM (old) | Fuzzy Logic (new) |
+| :--- | :--- | :--- |
+| Requires labelled training data | ✅ Yes (550 rows) | ❌ No — rule-based |
+| Interpretable decisions | ❌ Black-box kernel | ✅ Human-readable rules |
+| Handles uncertainty / grey zones | ❌ Hard boundary | ✅ Soft membership degrees |
+| Needs retraining on data shifts | ✅ Yes | ❌ No |
+| Handles noisy biometric signals | ❌ Sensitive | ✅ Naturally robust |
+| Clinical alignment | Indirect | ✅ Directly encodes EAR/MAR thresholds |
+
+### Fuzzy Inference Pipeline
+
+```
+Webcam Frame (30 fps)
+       │
+       ▼  MediaPipe FaceMesh
+       ├─ EAR  (avg Left + Right Eye Aspect Ratio)
+       ├─ MAR  (Mouth Aspect Ratio)
+       ├─ Pitch (nose-to-chin / cheek-to-cheek)
+       └─ Blink detection (EAR < 0.18)
+       │
+       ▼  10-frame rolling buffer → EAR_MA
+       │
+       ▼  FuzzyFatigueEngine.predict(EAR, MAR, Pitch, EAR_MA)
+          Step 1 — Fuzzification (triangular + trapezoidal MFs)
+          Step 2 — 19 Expert Rules → activation strengths (alert / moderate / tired)
+          Step 3 — Mamdani min-implication + max-OR aggregation
+          Step 4 — Centroid of Gravity defuzzification → Fatigue Index
+       │
+       ▼  20-frame prediction_history smoothing
+       ├─ smoothed_fatigue > 50% for 30 frames → sys.exit(80)  [TIRED]
+       └─ smoothed_awake  for 45 frames        → sys.exit(0)   [AWAKE]
+```
+
+### Fuzzy Inputs & Membership Sets
+
+| Input | Fuzzy Sets | Clinical Threshold |
+| :--- | :--- | :--- |
+| `EAR` | `closed`, `half_closed`, `open` | closed < 0.18, open > 0.25 |
+| `MAR` | `normal`, `yawning` | yawning > 0.50 |
+| `Pitch` | `nodding`, `upright` | nodding < 0.55 |
+| `EAR_MA` | `stable_closed`, `drifting`, `stable_open` | 10-frame rolling average |
+
+### Output & Decision Threshold
+
+```
+Fatigue Index universe: [0, 100]
+  alert    → [0, 40]   (trapezoidal)
+  moderate → [25, 75]  (triangular, peak at 50)
+  tired    → [55, 100] (trapezoidal)
+
+Decision: FatigueIndex ≥ 50  →  Label = 1 (Tired)
+```
+
+### Expected Performance
+
+| Metric | Expected Range |
+| :--- | :--- |
+| Accuracy | 82–92% |
+| Precision (Tired) | 85–94% |
+| Recall (Tired) | 80–92% |
+| F1 (macro) | 83–91% |
+
+> Unlike SVM, accuracy is not the primary metric — the key advantage is **interpretability**: every decision can be traced back to which rules fired and with what strength.
+
+### Vision Core Files
+
+| File | Purpose |
+| :--- | :--- |
+| `fuzzy_engine.py` | Core fuzzy inference engine — membership functions, 19 rules, CoG defuzz |
+| `train_fuzzy.py` | Evaluates engine on `dataset_v3.csv`, exports `fuzzy_model.pkl` + `fuzzy_eval_summary.json` |
+| `live_predictor_fuzzy.py` | Live webcam predictor with HUD overlay |
+| `augment_dataset.py` | Extracts EAR/MAR/Pitch from 2,200 archive images, augments to 10k+ rows |
+| `math_utils.py` | Shared EAR / MAR / Pitch utility functions |
+
+---
+
 ## 🛠️ Technical Stack
 
 | Component | Technology |
@@ -417,6 +507,7 @@ Posts a phishing-click event to `/api/adversarial_signal` to verify Layer 1 → 
 | **Neural CDE Model** | PyTorch + `torchcde` (Hermite cubic spline, RK4 integration) |
 | **Causal Graph** | NetworkX `MultiDiGraph` (Temporal Behaviour Graph) |
 | **Survival Analysis** | NumPy — Weibull Monte-Carlo posterior sampling |
+| **Vision / Fatigue Model** | Fuzzy Logic (Mamdani) — MediaPipe FaceMesh + pure-NumPy inference engine |
 | **Sensors** | Pynput (keys/mouse), Pycaw (audio), PyGetWindow (windows) |
 | **Calendar** | Google Calendar API v3 (OAuth 2.0) |
 | **API** | Flask + Flask-CORS |
@@ -428,6 +519,6 @@ Posts a phishing-click event to `/api/adversarial_signal` to verify Layer 1 → 
 ## 🔒 Privacy Guarantee
 
 - **No Keylogging**: Only keystroke *counts and rates* are recorded — never content.
-- **Privacy-First Vision**: Camera activates only on inactivity detection and shuts down immediately after EAR/MAR verification completes.
+- **Privacy-First Vision**: Camera activates only on inactivity detection and shuts down immediately after EAR/MAR/Pitch verification completes. The fuzzy engine processes only numerical biometric ratios — no raw images are stored.
 - **Fully Local**: All inference, telemetry, and model training runs on-device. No data leaves the machine.
 - **Read-Only Calendar**: Google Calendar access is scoped to `calendar.readonly`. Credentials stored locally in `core/credentials.json`.
