@@ -4,14 +4,13 @@ LAYER 6: core/simulation_engine.py
 L6 — TRUE Digital Twin: Monte-Carlo Counterfactual Simulation
      Future trajectories ~ p(Zt:T | Zt)
 
-     Each trajectory integrates stochastic dynamics driven by the
-     current NCDE state, not hand-written drift rules.
-     Outputs: mean, CI bands, burnout horizon, counterfactual deltas.
+     BREAKTHROUGH 4: Ct drain rate is now regime-aware (fRt switching).
+     BREAKTHROUGH 3: MC trajectories used as training gradient signal.
 """
 
 import numpy as np
 import copy
-from core.risk_forecaster import CyberRiskForecaster
+from core.risk_forecaster import CyberRiskForecaster, REGIME_DYNAMICS
 
 # ─────────────────────────────────────────────────────────────
 # STOCHASTIC DYNAMICS ENGINE
@@ -205,15 +204,18 @@ class DigitalTwinSimulator:
             # ── Dt dynamics ──
             dt = np.clip(dt + drift_d + nd, 0.05, 1.0)
 
-            # ── Ct dynamics ──
+            # ── Ct dynamics — B4: drain rate is regime-aware ──
             aging_decay = aging_rate * t
             ceiling     = np.clip(1.0 - aging_decay, 0.05, 1.0)
             draining    = dt > drain_threshold
+            # B4: use regime-specific Ct drain rate (fRt switching)
+            regime_drain = REGIME_DYNAMICS[self.forecaster.regime.current_regime]["Ct_drain_rate"]
             ct = np.where(
                 draining,
-                np.clip(ct - 0.015 + nc + recovery, 0.05, ceiling),
-                np.clip(ct + 0.008 + nc + recovery, 0.05, ceiling),
+                np.clip(ct - regime_drain + nc + recovery, 0.05, ceiling),
+                np.clip(ct + 0.008 + nc + recovery,        0.05, ceiling),
             )
+
 
             # ── Ht dynamics ──
             ht = np.clip(ht + ht_gain + nh, 0.0, 1.0)
@@ -250,6 +252,9 @@ class DigitalTwinSimulator:
             hazards    = all_hazards[t]
             burnout_pct = float(np.mean(risks > 70) * 100)
             mean_risk   = float(np.mean(risks))
+            # B4: include current regime in every simulation step
+            current_regime = self.forecaster.regime.current_regime
+            regime_label   = REGIME_DYNAMICS[current_regime]["label"]
 
             aggregated.append({
                 "step":              t + 1,
@@ -261,7 +266,10 @@ class DigitalTwinSimulator:
                 "Mean_Capacity":     round(float(np.mean(caps)),              4),
                 "Mean_Hazard_24h":   round(float(np.mean(hazards)),           2),
                 "Burnout_Confidence":round(burnout_pct,                       2),
+                "Regime":            current_regime,        # B4
+                "Regime_Label":      regime_label,          # B4
             })
+
 
             if burnout_horizon is None and mean_risk >= 70:
                 burnout_horizon = t + 1

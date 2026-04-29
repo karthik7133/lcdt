@@ -158,9 +158,39 @@ class BehaviourGraphEngine:
 
 
 # ─────────────────────────────────────────────────────────────
-# LAYER 2 — NEURAL CONTROLLED DIFFERENTIAL EQUATIONS (NCDE)
-# dZt = f_theta(Zt)dt + g_phi(Zt)dXt
+# LAYER 2 — CAUSAL NEURAL CONTROLLED DIFFERENTIAL EQUATIONS
+# dZt = (Iπt ∘ f)(Zt)dt + g_ϕ(Zt)dXt
+# Unifies NCDE (Kidger) + SCM (Pearl) at the dynamics level.
 # ─────────────────────────────────────────────────────────────
+
+# Intervention operator table: γπ scales drift, δπ shifts it
+# Order of dimensions: [Ct, Dt, Ht, At, ...extras]
+INTERVENTION_PARAMS = {
+    "baseline":             {"gamma": [1.00, 1.00, 1.000, 1.00], "delta": [0.00, 0.00, 0.00, 0.00]},
+    "reduce_notifications": {"gamma": [1.00, 0.70, 1.000, 1.00], "delta": [0.00, 0.00, 0.00, 0.00]},
+    "reduce_meetings":      {"gamma": [1.00, 0.80, 1.000, 1.00], "delta": [0.00, 0.00, 0.00, 0.00]},
+    "pause_work":           {"gamma": [1.00, 0.30, 1.000, 1.00], "delta": [0.04, 0.00, 0.00, 0.00]},
+    "improve_sleep":        {"gamma": [1.00, 1.00, 1.000, 1.00], "delta": [0.15, 0.00, 0.00, 0.00]},
+    "security_training":    {"gamma": [1.00, 1.00, 1.010, 1.00], "delta": [0.00, 0.00, 0.00, 0.00]},
+    "adversarial_drill":    {"gamma": [1.00, 1.00, 1.000, 0.50], "delta": [0.00, 0.00, 0.00, 0.00]},
+}
+
+
+class InterventionModule:
+    """
+    Iπt ∘ f = diag(γπ) · f(Zt) + δπ
+    Applies the causal intervention operator to the autonomous drift output.
+    Operates on the first 4 hidden dimensions (Ct, Dt, Ht, At).
+    """
+    def apply(self, f_out: torch.Tensor, policy: str) -> torch.Tensor:
+        params = INTERVENTION_PARAMS.get(policy, INTERVENTION_PARAMS["baseline"])
+        gamma = torch.tensor(params["gamma"], dtype=torch.float32)  # (4,)
+        delta = torch.tensor(params["delta"], dtype=torch.float32)  # (4,)
+        out = f_out.clone()
+        n = min(4, out.shape[-1])
+        out[:, :n] = out[:, :n] * gamma[:n] + delta[:n]
+        return out
+
 
 INPUT_DIM  = 12   # Graph embedding dimension (L1 output)
 HIDDEN_DIM = 8    # Latent state Zt dimension (Ct, Dt, Ht, At + extras)
@@ -169,16 +199,29 @@ OUTPUT_DIM = 4    # Semantic outputs: [Ct, Dt, Ht, At]
 
 class CDEFunc(nn.Module):
     """
-    Parameterises g_phi(Zt): R^H → R^(H × X)
-    The drift component f_theta(Zt) is the autonomous part inside the net.
+    Causal CDE function implementing:
+      dZt = (Iπt ∘ f)(Zt)dt + g_ϕ(Zt)dXt
+    f_net  = autonomous drift MLP (intrinsic cognitive dynamics)
+    net    = control matrix g_ϕ(Zt) (behaviour-path driven)
+    Iπt    = intervention operator applied to f_net output
     """
 
     def __init__(self, input_dim: int, hidden_dim: int):
         super().__init__()
         self.input_dim  = input_dim
         self.hidden_dim = hidden_dim
+        self._policy    = "baseline"
+        self.intervention = InterventionModule()
 
-        # Two-layer MLP with tanh activation (bounded, suitable for dynamics)
+        # Autonomous drift net: f(Zt)  [NEW — B1]
+        self.f_net = nn.Sequential(
+            nn.Linear(hidden_dim, 32),
+            nn.Tanh(),
+            nn.Linear(32, hidden_dim),
+            nn.Tanh(),
+        )
+
+        # Control matrix net: g_ϕ(Zt)
         self.net = nn.Sequential(
             nn.Linear(hidden_dim, 64),
             nn.Tanh(),
@@ -188,9 +231,18 @@ class CDEFunc(nn.Module):
             nn.Tanh(),
         )
 
+    def set_policy(self, policy: str):
+        """Set active intervention policy for the CDE integration."""
+        self._policy = policy
+
     def forward(self, t, z):
         # z: (batch, hidden_dim)
-        out = self.net(z)                              # (batch, H*X)
+        # Autonomous drift with causal intervention gate (B1)
+        f_out    = self.f_net(z)                                      # (batch, H)
+        f_causal = self.intervention.apply(f_out, self._policy)       # (batch, H)
+        # Control matrix (behaviour path modulates state via g_ϕ)
+        g_in = z + 0.1 * f_causal                                     # drift pre-conditions g
+        out  = self.net(g_in)                                         # (batch, H*X)
         return out.view(z.size(0), self.hidden_dim, self.input_dim)
 
 
@@ -211,7 +263,7 @@ class ReadoutHead(nn.Module):
 
 
 class NCDEModel(nn.Module):
-    """Full NCDE model: initial encoder + CDE function + readout head."""
+    """Causal NCDE: dZt = (Iπt ∘ f)(Zt)dt + g_ϕ(Zt)dXt."""
 
     def __init__(self, input_dim=INPUT_DIM, hidden_dim=HIDDEN_DIM,
                  output_dim=OUTPUT_DIM):
@@ -224,13 +276,18 @@ class NCDEModel(nn.Module):
             nn.Tanh(),
         )
         self.cde_func = CDEFunc(input_dim, hidden_dim)
-        self.readout   = ReadoutHead(hidden_dim, output_dim)
+        self.readout  = ReadoutHead(hidden_dim, output_dim)
 
-    def forward(self, x_seq: torch.Tensor) -> torch.Tensor:
+    def forward(self, x_seq: torch.Tensor,
+                policy: str = "baseline") -> torch.Tensor:
         """
-        x_seq: (batch, seq_len, input_dim)
-        Returns: (batch, output_dim)  — final Zt semantic values
+        x_seq:  (batch, seq_len, input_dim)
+        policy: intervention policy active during integration (B1)
+        Returns: (batch, output_dim) — intervention-aware Zt
         """
+        # Set active policy on CDE function (B1)
+        self.cde_func.set_policy(policy)
+
         # --- Build spline path X(t) ---
         t_span = torch.linspace(0, 1, x_seq.size(1))
         coeffs  = torchcde.hermite_cubic_coefficients_with_backward_differences(
@@ -258,50 +315,113 @@ class NCDEModel(nn.Module):
 
 class UserProfile:
     """
-    Holds per-user MAP estimate of cognitive priors.
-    Updated online via exponential moving average (a lightweight
-    approximate Bayesian update without full VI).
+    BREAKTHROUGH 2 — Causal Personalization.
+    Old: μ_new = (1-α)*μ + α*z_observed  (EMA — temporal, ignores causality)
+    New: μ_user(t) = argmin_μ  E_do(π)[L(Zt, μ)]
+
+    The personal prior is updated based on how the user *responds to interventions*,
+    not just what was observed. This distinguishes:
+      - sleep-sensitive vs meeting-fragile users
+      - resilient vs burnout-trajectory users
     """
+
+    # All policies used in causal sensitivity estimation
+    ALL_POLICIES = list(INTERVENTION_PARAMS.keys())
 
     def __init__(self, user_id: str = "default", alpha: float = 0.05):
         self.user_id = user_id
-        # mu_user: [Ct_baseline, Dt_baseline, Ht_baseline, At_baseline]
         self.mu     = np.array([1.0, 0.1, 0.8, 0.0], dtype=np.float32)
-        # sigma_user: diagonal covariance (stress sensitivity per dimension)
         self.sigma  = np.array([0.05, 0.1, 0.05, 0.02], dtype=np.float32)
-        # EMA learning rate for online update
         self.alpha  = alpha
         self.n_obs  = 0
+        # B2: Causal sensitivity profile — how much each intervention moves Zt
+        self.causal_sensitivity_profile: dict = {
+            pi: 0.0 for pi in self.ALL_POLICIES
+        }
+        # B2: Per-policy response history for online update
+        self._policy_z_buffer: dict = {pi: [] for pi in self.ALL_POLICIES}
 
     def update(self, z_obs: np.ndarray):
         """
-        Online MAP update: exponential moving average.
-        mu_new = (1-alpha)*mu + alpha*z_obs
+        Legacy-compatible EMA update (still called for sigma tracking).
         """
         self.mu    = (1 - self.alpha) * self.mu + self.alpha * z_obs
         residual   = (z_obs - self.mu) ** 2
         self.sigma = (1 - self.alpha) * self.sigma + self.alpha * residual
         self.n_obs += 1
 
+    def causal_update(self, policy_z_map: dict):
+        """
+        BREAKTHROUGH 2 — Causal prior update.
+        policy_z_map: {policy_name: z_under_policy (np.ndarray, shape (4,))}
+
+        Update rule (online gradient step):
+          μ ← μ + η · Σ_π [Zt^π - μ] / |Π|
+
+        Also updates causal_sensitivity_profile:
+          sensitivity[π] = ||Zt^π - z_baseline||
+        """
+        if not policy_z_map:
+            return
+        eta = 0.03  # causal learning rate (slower than EMA to avoid noise)
+        z_baseline = policy_z_map.get("baseline", self.mu)
+
+        # Gradient step: pull mu toward average interventional outcome
+        z_sum = np.zeros(4, dtype=np.float32)
+        for pi, z_pi in policy_z_map.items():
+            z_arr = np.array(z_pi, dtype=np.float32)
+            z_sum += z_arr
+            # Sensitivity = how far this policy moves state from baseline
+            diff = np.linalg.norm(z_arr - z_baseline)
+            # Smooth sensitivity with exponential averaging
+            self.causal_sensitivity_profile[pi] = (
+                0.9 * self.causal_sensitivity_profile[pi] + 0.1 * float(diff)
+            )
+        mu_interventional = z_sum / len(policy_z_map)
+        self.mu = self.mu + eta * (mu_interventional - self.mu)
+        self.n_obs += 1
+
+    def get_resilience_profile(self) -> dict:
+        """
+        Returns the causal sensitivity profile with a resilience label.
+        High sensitivity to a policy → user responds strongly to that intervention.
+        Low sensitivity → user is resilient to (or unaffected by) that policy.
+        """
+        profile = dict(self.causal_sensitivity_profile)
+        best_policy = max(profile, key=profile.get) if profile else "baseline"
+        return {
+            "sensitivity": profile,
+            "most_effective_intervention": best_policy,
+            "user_type": self._classify_user(profile),
+        }
+
+    def _classify_user(self, profile: dict) -> str:
+        if not profile or all(v == 0.0 for v in profile.values()):
+            return "uncalibrated"
+        top = max(profile, key=profile.get)
+        labels = {
+            "improve_sleep": "sleep-sensitive",
+            "reduce_notifications": "notification-fragile",
+            "reduce_meetings": "meeting-fragile",
+            "pause_work": "overload-prone",
+            "security_training": "training-responsive",
+            "adversarial_drill": "threat-aware",
+            "baseline": "self-regulating",
+        }
+        return labels.get(top, "mixed")
+
     def calibrate_from_history(self, history: np.ndarray):
-        """
-        Batch calibration from historical [Ct, Dt, Ht, At] data.
-        Uses running mean/std as the initial prior.
-        """
+        """Batch calibration from historical [Ct, Dt, Ht, At] data."""
         if len(history) > 5:
             self.mu    = history.mean(axis=0).astype(np.float32)
             self.sigma = history.std(axis=0).astype(np.float32) + 1e-4
             self.n_obs = len(history)
 
     def shrink(self, z_model: np.ndarray, shrinkage: float = 0.85) -> np.ndarray:
-        """
-        Posterior estimate: blend model output with personalised prior.
-        z_posterior = shrinkage * z_model + (1-shrinkage) * mu_user
-        Shrinkage → 1.0 trusts model; → 0.0 trusts prior only.
-        Increases toward 1.0 as n_obs grows.
-        """
+        """Posterior estimate: blend model output with personalised prior."""
         adaptive = min(shrinkage, 0.5 + self.n_obs / 200.0)
         return adaptive * z_model + (1 - adaptive) * self.mu
+
 
 
 # ─────────────────────────────────────────────────────────────
@@ -559,33 +679,41 @@ class NeuralCDEInference:
             }
             return self._last_state
 
-        # ── L2: Solve NCDE (only when the path has enough variation) ──
+        # ── L2: Causal NCDE — solve under ALL policies (B1 + B3) ──
         x_seq = torch.stack(window_list).unsqueeze(0)  # (1, T, 12)
 
         with torch.no_grad():
-            z_out = self.model(x_seq)   # (1, 4) — [Ct, Dt, Ht, At]
+            # Run under baseline for live state
+            z_out = self.model(x_seq, policy="baseline")   # (1, 4)
+
+            # B3: Run under every policy to build causal sensitivity map
+            policy_z_map = {}
+            for pi in UserProfile.ALL_POLICIES:
+                z_pi = self.model(x_seq, policy=pi).squeeze(0).numpy()  # (4,)
+                policy_z_map[pi] = self.profile.shrink(z_pi)
 
         z_np = z_out.squeeze(0).numpy()  # (4,)
 
         # ── L3: Personalise (Bayesian shrinkage toward user prior) ──
         z_personal = self.profile.shrink(z_np)
 
-        # Online update of user profile
+        # B2: Causal prior update (replaces raw EMA update with interventional avg)
+        self.profile.causal_update(policy_z_map)
+        # Also keep sigma estimate updated via legacy EMA
         self.profile.update(z_personal)
 
+        # B3: Track active policy for training log (default: baseline during live)
+        self._active_policy = getattr(self, '_active_policy', 'baseline')
+
         # ── EMA Smoothing: prevent tick-to-tick oscillations ──
-        # Initialise EMA state on first call
         if not hasattr(self, '_ema_state'):
             self._ema_state = np.array([1.0, 0.1, 0.8, 0.0], dtype=np.float32)
 
         alpha = self.EMA_ALPHA
-        # NCDE contributes Ct, Ht, At; we override Dt with signal-driven value
         ncde_ct = float(np.clip(z_personal[0], 0.1, 1.0))
         ncde_ht = float(np.clip(z_personal[2], 0.0, 1.0))
         ncde_at = float(np.clip(z_personal[3], 0.0, 1.0))
 
-        # --- Slew Rate Limit (Stability Force) ---
-        # Don't allow values to jump more than MAX_SLEW from last state
         def apply_slew(current, target, max_delta):
             delta = target - current
             if abs(delta) > max_delta:
@@ -598,7 +726,6 @@ class NeuralCDEInference:
         ncde_at = apply_slew(last["Adversarial_At"], ncde_at, self.MAX_SLEW)
 
         raw = np.array([ncde_ct, dt_signal, ncde_ht, ncde_at], dtype=np.float32)
-
         self._ema_state = (1 - alpha) * self._ema_state + alpha * raw
 
         ct = float(np.clip(self._ema_state[0], 0.1, 1.0))
@@ -606,14 +733,23 @@ class NeuralCDEInference:
         ht = float(np.clip(self._ema_state[2], 0.0, 1.0))
         at = float(np.clip(self._ema_state[3], 0.0, 1.0))
 
+        # B3: Build counterfactual columns for latent_states.csv
+        cf_cols = {}
+        for pi, z_pi in policy_z_map.items():
+            safe_pi = pi.replace(" ", "_")
+            cf_cols[f"Ct_cf_{safe_pi}"] = round(float(np.clip(z_pi[0], 0.1, 1.0)), 4)
+
         self._last_state = {
             "Capacity_Ct":      round(ct, 3),
             "Demand_Dt":        round(dt, 3),
             "Habits_Ht":        round(ht, 3),
             "Adversarial_At":   round(at, 3),
             "Reserve_Gap_CRGt": round(ct - dt, 3),
+            "policy_active":    self._active_policy,   # B3
+            **cf_cols,                                  # B3: counterfactual Ct per policy
         }
         return self._last_state
+
 
 
 # ─────────────────────────────────────────────────────────────

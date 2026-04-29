@@ -28,6 +28,7 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from core.risk_forecaster import CyberRiskForecaster
 from core.simulation_engine import DigitalTwinSimulator
+from core.state_inference import NeuralCDEInference
 
 app = Flask(__name__)
 CORS(app)
@@ -40,10 +41,11 @@ TELEMETRY_CSV   = os.path.join(DATA_DIR, 'telemetry_history.csv')
 INTERVENTIONS_LOG = os.path.join(DATA_DIR, 'interventions.log')
 LATENT_LOG      = os.path.join(DATA_DIR, 'latent_states.csv')
 
-# ── Engine Initialisation (once at server start) ─────────────
+# ── Engine Initialisation (once at server start) ────────────────────
 print("[API] Initialising Scientific Engines...")
 risk_forecaster = CyberRiskForecaster()
 simulator       = DigitalTwinSimulator()
+ncde_engine     = NeuralCDEInference()   # for resilience_profile (B2)
 print("[API] Ready.")
 
 
@@ -141,20 +143,43 @@ def get_summary():
 
 @app.route('/api/hazard', methods=['GET'])
 def get_hazard():
-    """
-    L5 Bayesian Hazard Model.
-    Returns P(mistake) with full posterior uncertainty (CI bands) for
-    three time windows: 1 hour, 24 hours, 7 days.
-    """
     state = _latest_state()
     if not state:
         return jsonify({"error": "No latent state available"}), 404
-
     return jsonify({
         "hazard_1h":  risk_forecaster.forecast_hazard(state, window_hours=1),
         "hazard_24h": risk_forecaster.forecast_hazard(state, window_hours=24),
         "hazard_7d":  risk_forecaster.forecast_hazard(state, window_hours=168),
     })
+
+
+@app.route('/api/regime', methods=['GET'])
+def get_regime():
+    """
+    BREAKTHROUGH 4 — Current cognitive regime (phase transition model).
+    Returns regime label, hazard h, Ct drain rate, and ticks to next transition.
+    """
+    state = _latest_state()
+    if not state:
+        return jsonify({"error": "No latent state available"}), 404
+    try:
+        return jsonify(risk_forecaster.evaluate_regime(state))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/resilience_profile', methods=['GET'])
+def get_resilience_profile():
+    """
+    BREAKTHROUGH 2 — Causal user resilience profile.
+    Returns causal sensitivity per policy and the most effective intervention.
+    """
+    try:
+        return jsonify(ncde_engine.profile.get_resilience_profile())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 
 
 # ── NEW: All Counterfactuals Endpoint (L4) ───────────────────

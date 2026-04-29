@@ -194,6 +194,106 @@ class BayesianHazardModel:
 
 
 # ─────────────────────────────────────────────────────────────
+# BREAKTHROUGH 4 — REGIME HAZARD MODEL (Phase Transitions)
+# Hazard h(Zt) → regime switch fRt instead of a probability.
+# Mistakes are phase transitions, not probabilities.
+# ─────────────────────────────────────────────────────────────
+
+# Regime thresholds on normalised hazard h ∈ [0, 1]
+REGIME_THRESHOLDS = {
+    0: 0.25,   # Nominal → Fatigue-Onset
+    1: 0.55,   # Fatigue-Onset → Critical
+    2: 0.80,   # Critical → Breakdown
+}
+
+# Regime-specific drift multipliers fed back into simulation_engine
+REGIME_DYNAMICS = {
+    0: {"label": "Nominal",       "Ct_drain_rate": 0.015, "error_sensitivity": 1.0},
+    1: {"label": "Fatigue-Onset", "Ct_drain_rate": 0.030, "error_sensitivity": 1.15},
+    2: {"label": "Critical",      "Ct_drain_rate": 0.050, "error_sensitivity": 1.40},
+    3: {"label": "Breakdown",     "Ct_drain_rate": 0.100, "error_sensitivity": 2.00},
+}
+
+HYSTERESIS_TICKS = 3   # ticks of sustained recovery before downgrading regime
+
+
+class RegimeHazardModel:
+    """
+    BREAKTHROUGH 4 — Events as Regime Shifts.
+
+    Instead of returning P(mistake in τh), crossing h(Zt) > θ
+    switches the autonomous drift:  f(Zt) → fR(Zt)
+
+    Regimes:
+      R=0  Nominal        h < 0.25   Ct drain -0.015/tick
+      R=1  Fatigue-Onset  0.25-0.55  Ct drain -0.030/tick, error +15%
+      R=2  Critical       0.55-0.80  Ct drain -0.050/tick, decisions -40%
+      R=3  Breakdown      h >= 0.80  Ct collapses, mistake near-certain
+
+    Hysteresis: upgrade is immediate; downgrade needs 3 consecutive ticks.
+    """
+
+    def __init__(self, weibull_model: 'BayesianHazardModel'):
+        self.weibull = weibull_model
+        self.current_regime: int = 0
+        self._recovery_ticks: int = 0   # ticks below downgrade threshold
+
+    def _normalised_hazard(self, risk_pct: float) -> float:
+        """Compute normalised instantaneous hazard h ∈ [0, 1] from risk score."""
+        tau = 1.0   # 1-hour instantaneous hazard
+        result = self.weibull.predict(risk_pct, tau)
+        return float(np.clip(result["mean"] / 100.0, 0.0, 1.0))
+
+    def evaluate(self, risk_pct: float) -> dict:
+        """
+        Main B4 method. Returns regime label, dynamics params, and transition forecast.
+        Called every inference tick; updates self.current_regime with hysteresis.
+        """
+        h = self._normalised_hazard(risk_pct)
+
+        # ── Regime upgrade: immediate ──
+        new_regime = self.current_regime
+        for r in [2, 1, 0]:   # check highest threshold first
+            if h > REGIME_THRESHOLDS[r]:
+                new_regime = r + 1
+                break
+
+        if new_regime > self.current_regime:
+            self.current_regime = new_regime
+            self._recovery_ticks = 0
+
+        # ── Regime downgrade: hysteresis ──
+        elif new_regime < self.current_regime:
+            self._recovery_ticks += 1
+            if self._recovery_ticks >= HYSTERESIS_TICKS:
+                self.current_regime = max(0, self.current_regime - 1)
+                self._recovery_ticks = 0
+        else:
+            self._recovery_ticks = 0
+
+        dynamics = REGIME_DYNAMICS[self.current_regime]
+
+        # Estimate ticks to next regime transition at current h
+        ticks_to_upgrade = None
+        if self.current_regime < 3:
+            next_thresh = REGIME_THRESHOLDS[self.current_regime]
+            if h > 0 and h < next_thresh:
+                # Linear extrapolation: how many ticks at current h growth rate
+                ticks_to_upgrade = round((next_thresh - h) / max(h * 0.05, 0.001))
+
+        return {
+            "regime":            self.current_regime,
+            "regime_label":      dynamics["label"],
+            "hazard_h":          round(h, 4),
+            "Ct_drain_rate":     dynamics["Ct_drain_rate"],
+            "error_sensitivity": dynamics["error_sensitivity"],
+            "ticks_to_next_regime": ticks_to_upgrade,
+            "recovery_ticks":    self._recovery_ticks,
+        }
+
+
+
+# ─────────────────────────────────────────────────────────────
 # UNIFIED FORECASTER — public API
 # ─────────────────────────────────────────────────────────────
 
@@ -202,28 +302,35 @@ class CyberRiskForecaster:
     Public API combining:
       - Causal live risk score (L4)
       - Probabilistic mistake window (L5)
+      - Regime Hazard Model: h(Zt) → regime switch (B4)
       - Counterfactual what-if analysis (L4 do-calculus)
     """
 
     def __init__(self):
         self.causal  = CausalRiskEngine()
         self.hazard  = BayesianHazardModel()
+        self.regime  = RegimeHazardModel(self.hazard)   # B4
+
 
     # ── Live Risk (used by telemetry_tracker.py every 10s) ──
     def calculate_live_risk(self, latent_state: dict) -> float:
         return self.causal.calculate_causal_risk(latent_state)
 
-    # ── Hazard: P(mistake in next N hours) ──
     def forecast_hazard(self, latent_state: dict,
                         window_hours: float = 24) -> dict:
         risk = self.calculate_live_risk(latent_state)
         return self.hazard.predict(risk, window_hours)
 
-    # ── Counterfactual: do(intervention) ──
+    def evaluate_regime(self, latent_state: dict) -> dict:
+        """B4: Evaluate current cognitive regime (phase transition model)."""
+        risk = self.calculate_live_risk(latent_state)
+        return self.regime.evaluate(risk)
+
     def perform_counterfactual(self, latent_state: dict,
                                intervention: str) -> dict:
         original  = self.calculate_live_risk(latent_state)
         mitigated = self.causal.calculate_causal_risk(latent_state, intervention)
+        regime_orig = self.regime.evaluate(original if isinstance(original, (int, float)) else 0)
         return {
             "intervention":   intervention,
             "original_risk":  original,
@@ -231,7 +338,10 @@ class CyberRiskForecaster:
             "reduction":      round(original - mitigated, 2),
             "hazard_24h_original":  self.hazard.predict(original,  24)["mean"],
             "hazard_24h_mitigated": self.hazard.predict(mitigated, 24)["mean"],
+            "regime":         self.regime.current_regime,
+            "regime_label":   REGIME_DYNAMICS[self.regime.current_regime]["label"],
         }
+
 
     # ── All interventions at once ──
     def evaluate_all_interventions(self, latent_state: dict) -> list:
