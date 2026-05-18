@@ -1,0 +1,99 @@
+============================================================
+  LCDT DUAL-DATASET NCDE — EVALUATION REPORT
+  Generated: 2026-05-18 21:14:31
+============================================================
+
+MODEL ARCHITECTURE
+--------------------------------------------------
+  Type              : Neural Controlled Differential Equation (NCDE)
+  Input dim         : 12  (graph embedding)
+  Hidden dim        : 16
+  Output dim        : 4  [Ct, Dt, Ht, At]
+
+  COMPONENTS:
+    InitialEncoder  :      208 params  (input -> hidden state Z0)
+    CDEFunc         :   18,800 params  (CDE drift: dZt/dt = f(Zt)·dXt)
+    Head A (Ht, At) :      610 params  [CERT-trained, FROZEN]
+    Head B (Ct, Dt) :      610 params  [personally fine-tuned]
+    TOTAL           :   20,228 params
+    Trainable (B)   :      610 params  (personal phase only)
+
+  DUAL-HEAD DESIGN:
+    Head A — trained on CERT r4.2 (1000 users, 330K sessions)
+             At/Ht: adversarial and habits dynamics from real events
+             FROZEN after Phase 1. Never retrained on personal data.
+    Head B — fine-tuned on personal latent_states.csv
+             Ct/Dt: capacity and demand from your biometric signals
+             Auto-retrains every ~1hr (Phase 3, 200+ new rows)
+
+TRAINING CONFIGURATION
+--------------------------------------------------
+  PHASE 1 — CERT Pre-training
+    Dataset         : cert_latent_states.csv
+    Users           : 1,000  (CERT r4.2)
+    Sessions        : 330,452  total user-days
+    Sequences used  : 50,000  (random subsample per epoch)
+    Epochs          : 20
+    Batch size      : 256
+    Learning rate   : 1e-3  (all components)
+    Loss            : MSE on all 4 dims [Ct, Dt, Ht, At]
+    Output          : ncde_weights_cert.pt
+
+  PHASE 2 — Personal Fine-tuning
+    Dataset         : latent_states.csv  (your biometric data)
+    Head A          : FROZEN  (Ht/At — CERT knowledge preserved)
+    Training dims   : Ct and Dt only  (Ht/At zeroed out)
+    Reason          : At requires phishing events (can't trigger naturally)
+                      Ht requires USB/phishing behavior (sparse in personal)
+    Epochs          : 30
+    Batch size      : 16
+    LR backbone     : 3e-5  (very slow — preserves CERT dynamics)
+    LR Head B       : 1e-4  (normal fine-tuning rate)
+    Loss            : MSE on [Ct, Dt] only (indices 0-1)
+    Output          : ncde_weights.pt  (production weights)
+
+  PHASE 3 — Scheduled Auto-Retraining
+    Trigger         : Every 200 new rows in latent_states.csv
+    Check interval  : Every 360 ticks (~1 hour of tracker runtime)
+    Process         : Runs Phase 2 with epochs=20, lr=1e-4
+    Head A          : Always stays frozen
+
+EVALUATION RESULTS
+--------------------------------------------------
+
+  [A] CERT Test Set — 5,000 held-out sequences (ncde_weights_cert.pt)
+      Head B in CERT-calibrated state (pre-personalization)
+  Dimension                 R²     RMSE      MAE  Grade               Head
+  -------------------------------------------------------------------------------------
+  Ct (Capacity)        +0.9648   0.0459   0.0254  A+  Excellent       HEAD B – personal
+  Dt (Demand)          +0.9231   0.0459   0.0226  A+  Excellent       HEAD B – personal
+  Ht (Habits)          +0.9890   0.0381   0.0170  A+  Excellent       HEAD A – CERT frozen
+  At (Adversarial)     +0.6209   0.1349   0.0829  B   Fair            HEAD A – CERT frozen
+
+  [B] Personal Test Set — 20% held-out (latent_states.csv)
+      Production weights (ncde_weights.pt) — Head B in personal-calibrated state
+  Dimension                 R²     RMSE      MAE  Grade               Head
+  -------------------------------------------------------------------------------------
+  Ct (Capacity)        +0.6237   0.1209   0.0690  B   Fair            HEAD B – personal
+  Dt (Demand)          +0.6049   0.1924   0.1393  B   Fair            HEAD B – personal
+
+  NOTE: Personal R2 improves with data accumulation.
+        Phase 3 auto-retrains every 200 new rows (~33 min usage).
+        Ht and At excluded — sourced from CERT Head A (R2=0.99/0.65).
+
+DATA SOURCES
+--------------------------------------------------
+  CERT r4.2   : 1,000 users, 330,452 user-day sessions, 70 insider threats
+                Provides: Ht (habits) + At (adversarial) ground truth
+  Personal    : Your biometric sensors (keyboard, mouse, vision, sleep)
+                Provides: Ct (capacity) + Dt (demand) ground truth
+  Split logic : Personal data excluded Ht/At (noise from sparse events)
+                CERT data excluded from production weights (Head A frozen)
+
+WEIGHT FILES
+--------------------------------------------------
+  CERT pre-trained : C:\Users\chipi\OneDrive\Desktop\my_projects\cyber\core\ncde_weights_cert.pt
+  Production       : C:\Users\chipi\OneDrive\Desktop\my_projects\cyber\core\ncde_weights.pt
+  CERT size        : 86.4 KB
+  Production size  : 86.2 KB
+============================================================
